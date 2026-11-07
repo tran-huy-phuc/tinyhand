@@ -5,14 +5,17 @@
 <title>TinyHand toolbar</title>
 <!--
   Mirrors Toolbar.swift: 40pt buttons, 10pt corners, 6pt spacing, 8/10pt
-  insets, a 16pt dark-glass bar, and the ink swatches in a small tray above.
+  insets, a 16pt dark-glass bar. Two bars: drawing tools over pointers, and a
+  space above them for a tray (colours) and a hint. That space
+  is always there, so the window doesn't have to resize and jump; overlay
+  clicks only go to the part showing something (toolbar_solid_top).
   No inline style="" attributes: Tauri's CSP blocks them.
 -->
 <style>
   :root { color-scheme: dark; }
   html, body { margin: 0; background: transparent; overflow: hidden; user-select: none; -webkit-user-select: none; }
   body {
-    padding: 14px; display: inline-flex; flex-direction: column; align-items: flex-start; gap: 8px;
+    padding: 14px; display: inline-flex; flex-direction: column; align-items: center; gap: 8px; box-sizing: border-box;
     font: 12px "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
     transition: opacity .35s ease;
   }
@@ -30,6 +33,8 @@
   }
   button:hover { background: rgba(255, 255, 255, .08); }
   button.on, button.on:hover { background: rgba(255, 255, 255, .18); }
+  button.open, button.open:hover { background: rgba(255, 255, 255, .12); }
+  button:active { background: rgba(255, 255, 255, .24); }
   button img { width: 40px; height: 40px; pointer-events: none; }
   .laser { position: relative; width: 36px; height: 36px; border-radius: 50%;
     background: radial-gradient(circle, rgba(255, 41, 31, .55) 0%, rgba(255, 41, 31, 0) 70%); }
@@ -37,26 +42,48 @@
   .laser::after { content: ""; position: absolute; inset: 15px; border-radius: 50%; background: rgba(255, 219, 209, .95); }
   .divider { flex: none; width: 1px; height: 24px; background: rgba(255, 255, 255, .18); }
   .tool svg { width: 18px; height: 18px; fill: rgba(255, 255, 255, .85); }
+  .tool svg.s { width: 22px; height: 22px; fill: none; stroke: rgba(255, 255, 255, .88); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   .dot { position: relative; width: 26px; height: 26px; border-radius: 50%; box-shadow: 0 1px 3px rgba(0, 0, 0, .45); }
   .dot::after { content: ""; position: absolute; left: 6px; top: 5px; width: 9px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, .35); }
   .dot.match { background: conic-gradient(from 90deg, #ff3b30, #ff9500, #ffcc00, #34c759, #007aff, #af52de, #ff3b30); }
   .dot.match::after { display: none; }
-  .tray { display: none; flex-direction: row; gap: 2px; padding: 5px 6px; border-radius: 14px; }
+  .top { flex: none; align-self: stretch; height: 128px; display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-start; gap: 6px; }
+  .tray { display: none; flex-direction: row; align-items: center; gap: 2px; padding: 5px 6px; border-radius: 14px; }
+  .hint { display: none; box-sizing: border-box; max-width: 340px; padding: 8px 10px; border-radius: 12px; color: rgba(255, 255, 255, .78); line-height: 1.35; }
+  .hint.open { display: block; }
+  .hint h1 { margin: 0; font: inherit; font-weight: 600; color: #fff; display: flex; justify-content: space-between; gap: 12px; }
+  .hint kbd { font: inherit; font-weight: 400; color: rgba(255, 255, 255, .6); white-space: nowrap; }
+  .hint p { margin: 2px 0 0; }
+  .hint button.off { all: unset; display: inline-block; margin-top: 4px; color: #b9a4ff; }
+  .hint button.off:hover { text-decoration: underline; background: none; }
   .tray.open { display: flex; }
-  .tray button { width: 30px; height: 30px; border-radius: 15px; }
+  .tray button { width: 32px; height: 32px; border-radius: 16px; }
   .tray .dot { width: 20px; height: 20px; }
   .tray .dot::after { left: 5px; top: 4px; width: 7px; height: 4px; }
+  .tray .divider { margin: 0 4px; height: 20px; }
+  .thick { border-radius: 50%; background: rgba(255, 255, 255, .88); }
+  .thick.t0 { width: 5px; height: 5px; }
+  .thick.t1 { width: 8px; height: 8px; }
+  .thick.t2 { width: 12px; height: 12px; }
+  .thick.t3 { width: 17px; height: 17px; }
   .sound-off { display: none; }
   .muted .sound-on { display: none; }
   .muted .sound-off { display: inline; }
 </style>
 </head>
 <body>
-<div class="tray glass" id="tray"></div>
+<div class="top">
+  <div class="hint glass" id="hint"></div>
+  <div class="tray glass" id="tray"></div>
+</div>
+<div class="bar glass" id="tools">
+  <button class="tool" id="ink"><div class="dot" id="ink-dot"></div></button>
+  <div class="divider"></div>
+  <button class="tool" id="clear"><svg class="s" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 14h10l1-14"/><path d="M10 11v6M14 11v6"/></svg></button>
+</div>
 <div class="bar glass" id="bar">
   <div id="styles"></div>
   <div class="divider"></div>
-  <button class="tool" id="ink"><div class="dot" id="ink-dot"></div></button>
   <button class="tool" id="sound">
     <svg viewBox="0 0 24 24">
       <path d="M3 9.5v5c0 .6.4 1 1 1h3l4.3 3.6c.6.5 1.7.1 1.7-.8V5.7c0-.9-1.1-1.3-1.7-.8L7 8.5H4c-.6 0-1 .4-1 1z"/>
@@ -76,7 +103,15 @@
   let state = null;
   let last = '';
   let L = 'en';
+  let openTray = null;
 
+  // Button id: title, what it does, shortcut.
+  const HINTS = {
+    ink: ['inkTitle', 'descInk'],
+    clear: ['clearTitle', 'descClear', 'keyClearCombo'],
+    sound: ['soundTitle', 'descSound'],
+    exit: ['exitTitle', 'descExit', 'keyExitCombo'],
+  };
   function inkColor(p) {
     if (p.style === 'laser') return '#ff291f';
     const choice = state.inks.find(([id]) => id === p.ink);
@@ -90,22 +125,59 @@
     return d;
   }
 
+  function trayButton(title, on, inner, click) {
+    const b = document.createElement('button');
+    b.className = 'tool' + (on ? ' on' : '');
+    b.setAttribute('aria-label', title);
+    b.dataset.name = title;
+    if (typeof inner === 'string') b.innerHTML = inner; else b.append(inner);
+    b.onclick = click;
+    return b;
+  }
+
+  function divider() {
+    const d = document.createElement('div');
+    d.className = 'divider';
+    return d;
+  }
+
+  function fillTray() {
+    const p = state.prefs;
+    const tray = $('tray');
+    if (openTray === 'ink') {
+      const swatches = state.inks.map(([id, title, color]) => trayButton(I18n.ink(L, id, title), id === p.ink, dot(color, id === 'match'), () => {
+        invoke('set_prefs', { prefs: { ...state.prefs, ink: id } });
+      }));
+      const sizes = [0, 1, 2, 3].map(n => {
+        const d = document.createElement('div');
+        d.className = 'thick t' + n;
+        return trayButton(I18n.t(L, 'penSize', { n: n + 1 }), n === p.penSize, d, () => invoke('set_pen_size', { size: n }));
+      });
+      tray.replaceChildren(...swatches, divider(), ...sizes);
+    } else {
+      tray.replaceChildren();
+    }
+  }
+
   function render(s) {
     state = s;
     const p = state.prefs;
-    const key = JSON.stringify([p.pinned, p.style, p.handSound, p.laserSound, p.ink, p.language]);
+    const key = JSON.stringify([p.pinned, p.style, p.handSound, p.laserSound, p.ink, p.language, p.penSize]);
     if (key === last) return;
     last = key;
     L = I18n.lang(p);
     document.documentElement.lang = L;
-    $('ink').title = I18n.t(L, 'inkTitle');
-    $('exit').title = I18n.t(L, 'exitTitle');
+    const t = k => I18n.t(L, k);
+    for (const [id, [title]] of Object.entries(HINTS)) $(id).setAttribute('aria-label', t(title));
+
+
     const titles = Object.fromEntries(state.styles.map(x => [x.id, x.title]));
     // Like the Mac app, the current style shows even if it isn't pinned.
     const shown = p.pinned.includes(p.style) ? p.pinned : [...p.pinned, p.style];
     $('styles').replaceChildren(...shown.map(id => {
       const b = document.createElement('button');
-      b.title = I18n.hand(L, id, titles[id] || id);
+      b.dataset.name = I18n.hand(L, id, titles[id] || id);
+      b.setAttribute('aria-label', b.dataset.name);
       b.className = id === p.style ? 'on' : '';
       if (id === 'laser') {
         const l = document.createElement('div');
@@ -121,53 +193,163 @@
       return b;
     }));
     $('ink-dot').replaceWith(Object.assign(dot(inkColor(p)), { id: 'ink-dot' }));
-    $('tray').replaceChildren(...state.inks.map(([id, title, color]) => {
-      const b = document.createElement('button');
-      b.title = I18n.ink(L, id, title);
-      b.className = id === p.ink ? 'on' : '';
-      b.append(dot(color, id === 'match'));
-      b.onclick = () => {
-        setTray(false);
-        invoke('set_prefs', { prefs: { ...state.prefs, ink: id } });
-      };
-      return b;
-    }));
+    fillTray();
     const on = p.style === 'laser' ? p.laserSound : p.handSound;
     $('sound').classList.toggle('muted', !on);
-    $('sound').title = I18n.t(L, on ? 'soundOnTitle' : 'soundOffTitle');
     fit();
   }
 
-  function setTray(open) {
-    $('tray').classList.toggle('open', open);
-    $('ink').classList.toggle('on', open);
+  function setTray(which) {
+    hideHint();
+    openTray = which;
+    fillTray();
+    $('tray').classList.toggle('open', !!which);
+    for (const id of ['ink']) $(id).classList.toggle('open', id === which);
     fit();
   }
 
-  // Window size = everything visible. The tray sits above the bar, centred
-  // on the ink button; the window grows upwards (the overlay keeps its
-  // bottom edge pinned above the taskbar).
+  function toggleTray(which) {
+    setTray(openTray === which ? null : which);
+  }
+
+  // Window size = everything visible. The tray sits above the bars, centred
+  // on the button that opened it; the window grows upwards (the overlay keeps
+  // its bottom edge pinned above the taskbar).
   function fit() {
     const tray = $('tray');
-    if (tray.classList.contains('open')) {
-      const ink = $('ink').getBoundingClientRect();
+    if (openTray) {
+      const anchor = $(openTray).getBoundingClientRect();
       const bodyLeft = 14;
-      const left = Math.max(0, ink.left + ink.width / 2 - tray.offsetWidth / 2 - bodyLeft);
+      const width = document.body.getBoundingClientRect().width - 2 * bodyLeft;
+      const left = Math.max(0, Math.min(width - tray.offsetWidth, anchor.left + anchor.width / 2 - tray.offsetWidth / 2 - bodyLeft));
       tray.style.marginLeft = left + 'px';
     }
     const r = document.body.getBoundingClientRect();
     invoke('toolbar_resize', { width: Math.ceil(r.width), height: Math.ceil(r.height) });
+    publishSolid();
   }
 
-  $('ink').onclick = () => setTray(!$('tray').classList.contains('open'));
+  // Tell the overlay where the part showing something starts.
+  let lastSolid = -1;
+  function publishSolid() {
+    const shown = ['hint', 'tray', 'tools'].map($).filter(e => e.offsetParent !== null);
+    const top = Math.min(...shown.map(e => e.getBoundingClientRect().top)) - 6;
+    const fraction = Math.max(0, top) / Math.max(1, window.innerHeight);
+    if (Math.abs(fraction - lastSolid) > 0.001) {
+      lastSolid = fraction;
+      invoke('toolbar_solid_top', { fraction });
+    }
+  }
+
+  // Hints. The overlay reports the cursor, since hover events can't be relied
+  // on in a window that never takes focus (see OverlayEvent::ToolbarPointer).
+  const SHOW_AFTER = 450;
+  const HIDE_AFTER = 350;
+  let hinted = null;
+  let pendingEl = null;
+  let showTimer = 0;
+  let hideTimer = 0;
+
+  function hintable(el) {
+    if (!el || !state || !state.prefs.showHints) return null;
+    const b = el.closest('button');
+    if (!b) return null;
+    // While a tray is open, only its own items explain themselves.
+    if (openTray && !b.closest('#tray')) return null;
+    return (HINTS[b.id] || b.dataset.name) ? b : null;
+  }
+
+  function showHint(b) {
+    hinted = b;
+    const box = $('hint');
+    const h = document.createElement('h1');
+    const entry = HINTS[b.id];
+    h.append(entry ? I18n.t(L, entry[0]) : b.dataset.name);
+    if (entry && entry[2]) {
+      const k = document.createElement('kbd');
+      k.textContent = I18n.t(L, entry[2]);
+      h.append(k);
+    }
+    const parts = [h];
+    if (entry) {
+      const p = document.createElement('p');
+      p.textContent = I18n.t(L, entry[1]);
+      const off = document.createElement('button');
+      off.className = 'off';
+      off.textContent = I18n.t(L, 'hintsOff');
+      off.title = I18n.t(L, 'hintsOffNote');
+      off.onclick = () => {
+        hideHint();
+        invoke('set_prefs', { prefs: { ...state.prefs, showHints: false } });
+      };
+      parts.push(p, off);
+    }
+    box.replaceChildren(...parts);
+    box.classList.add('open');
+    const anchor = b.getBoundingClientRect();
+    const room = document.body.getBoundingClientRect().width - 28 - box.offsetWidth;
+    box.style.marginLeft = Math.max(0, Math.min(room, anchor.left + anchor.width / 2 - box.offsetWidth / 2 - 14)) + 'px';
+    publishSolid();
+  }
+
+  function hideHint() {
+    clearTimeout(showTimer);
+    clearTimeout(hideTimer);
+    showTimer = hideTimer = 0;
+    pendingEl = null;
+    hinted = null;
+    $('hint').classList.remove('open');
+    publishSolid();
+  }
+
+  function pointerAt(at) {
+    const el = at && document.elementFromPoint(at[0] * window.innerWidth, at[1] * window.innerHeight);
+    // On the hint itself: stay, so its button can be reached.
+    if (el && el.closest('#hint')) {
+      clearTimeout(showTimer);
+      clearTimeout(hideTimer);
+      showTimer = hideTimer = 0;
+      pendingEl = null;
+      return;
+    }
+    const b = hintable(el);
+    if (b === (pendingEl || hinted)) {
+      if (b) {
+        clearTimeout(hideTimer);
+        hideTimer = 0;
+      }
+      if (b || hideTimer) return;
+    }
+    clearTimeout(showTimer);
+    showTimer = 0;
+    pendingEl = b;
+    if (b) {
+      clearTimeout(hideTimer);
+      hideTimer = 0;
+      // Moving between buttons with a hint up: no need to wait again.
+      showTimer = setTimeout(() => {
+        pendingEl = null;
+        showHint(b);
+      }, hinted ? 0 : SHOW_AFTER);
+    } else if (hinted && !hideTimer) {
+      hideTimer = setTimeout(hideHint, HIDE_AFTER);
+    }
+  }
+
+  $('ink').onclick = () => toggleTray('ink');
+  $('clear').onclick = () => invoke('clear_ink');
   $('sound').onclick = () => invoke('toggle_sound');
   $('exit').onclick = () => invoke('set_active', { on: false });
   new ResizeObserver(fit).observe(document.body);
 
   listen('state', e => render(e.payload));
+  listen('pointer', e => pointerAt(e.payload));
   listen('reveal', e => {
     document.body.classList.toggle('away', !e.payload);
-    if (!e.payload) setTray(false);
+    if (!e.payload) {
+      setTray(null);
+      hideHint();
+    }
   });
   invoke('get_state').then(render);
 </script>

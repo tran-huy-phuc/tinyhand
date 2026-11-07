@@ -31,6 +31,16 @@ const VI: Text = Text {
     settings_title: "Cài đặt TinyHand",
 };
 
+/// A menu item's text. Windows shows the shortcut after a tab; macOS would
+/// show the tab, and its menus are read differently anyway.
+pub fn item(text: &'static str) -> &'static str {
+    if cfg!(target_os = "macos") {
+        text.split('\t').next().unwrap_or(text)
+    } else {
+        text
+    }
+}
+
 /// `lang` is the saved choice; empty (not chosen yet) uses English.
 pub fn text(lang: &str) -> &'static Text {
     match lang {

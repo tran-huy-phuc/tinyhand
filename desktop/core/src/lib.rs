@@ -14,6 +14,7 @@ pub mod ink;
 pub mod interact;
 pub mod prefs;
 mod raster;
+pub mod tools;
 
 pub use asset::HandAsset;
 pub use engine::{Engine, Look, Settings};

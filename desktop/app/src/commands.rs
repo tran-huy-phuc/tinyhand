@@ -55,6 +55,11 @@ pub fn clear_ink(app: AppHandle) {
 }
 
 #[tauri::command]
+pub fn set_pen_size(app: AppHandle, size: u8) {
+    app::update_prefs(&app, |p| p.pen_size = size);
+}
+
+#[tauri::command]
 pub fn open_settings(app: AppHandle) {
     app::open_settings(&app);
 }
@@ -70,6 +75,12 @@ pub fn set_launch_at_login(app: AppHandle, on: bool) -> Result<(), String> {
     let result = if on { auto.enable() } else { auto.disable() };
     app::emit_state(&app);
     result.map_err(|e| e.to_string())
+}
+
+/// The toolbar page reports where its visible part starts.
+#[tauri::command]
+pub fn toolbar_solid_top(fraction: f64) {
+    crate::platform::set_toolbar_solid_top(fraction);
 }
 
 /// The toolbar page reports its content size; the overlay keeps it centred.

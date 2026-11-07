@@ -11,7 +11,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Wry};
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
-use tinyhand_core::{catalog, Look, Prefs, Settings};
+use tinyhand_core::{catalog, tools, Look, Prefs, Settings};
 
 use crate::assets::Assets;
 use crate::platform::{Overlay, OverlayConfig, OverlayEvent};
@@ -49,6 +49,9 @@ const TRAY_ON: &[u8] = include_bytes!("../icons/tray_on.png");
 const TRAY_OFF: &[u8] = include_bytes!("../icons/tray_off.png");
 
 pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    // A menu bar app: no Dock icon.
+    #[cfg(target_os = "macos")]
+    app.set_activation_policy(tauri::ActivationPolicy::Accessory);
     let handle = app.handle().clone();
     let data_dir = app.path().app_config_dir()?;
     log::init(data_dir.clone());
@@ -67,6 +70,9 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let overlay = Overlay::new(move |event| match event {
         OverlayEvent::Reveal(on) => {
             let _ = events_handle.emit_to("toolbar", "reveal", on);
+        }
+        OverlayEvent::ToolbarPointer(at) => {
+            let _ = events_handle.emit_to("toolbar", "pointer", at);
         }
     });
 
@@ -92,6 +98,11 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     if first_run {
         open_settings(&handle);
     }
+    // For trying the overlay from a dev build without touching the tray.
+    #[cfg(debug_assertions)]
+    if std::env::var_os("TINYHAND_POINTER_ON").is_some() {
+        set_active(&handle, true);
+    }
     Ok(())
 }
 
@@ -103,8 +114,8 @@ pub fn shutdown(app: &AppHandle) {
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let text = i18n::text(&app.state::<App>().prefs.lock().unwrap().language);
-    let toggle_item = MenuItem::with_id(app, "toggle", text.turn_on, true, None::<&str>)?;
-    let clear = MenuItem::with_id(app, "clear", text.clear, true, None::<&str>)?;
+    let toggle_item = MenuItem::with_id(app, "toggle", i18n::item(text.turn_on), true, None::<&str>)?;
+    let clear = MenuItem::with_id(app, "clear", i18n::item(text.clear), true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", text.settings, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", text.quit, true, None::<&str>)?;
     let menu = Menu::with_items(
@@ -168,7 +179,7 @@ pub fn set_active(app: &AppHandle, on: bool) {
         if let Err(e) = shortcuts.register(escape_key()) {
             log::write(format!("couldn't register Esc: {e}"));
         }
-        if !cfg!(windows) {
+        if !cfg!(any(windows, target_os = "macos")) {
             if let Some(t) = toolbar {
                 let _ = t.show();
             }
@@ -176,7 +187,8 @@ pub fn set_active(app: &AppHandle, on: bool) {
     } else {
         let _ = shortcuts.unregister(escape_key());
         state.overlay.deactivate();
-        if !cfg!(windows) {
+        configure_overlay(app);
+        if !cfg!(any(windows, target_os = "macos")) {
             if let Some(t) = app.get_webview_window("toolbar") {
                 let _ = t.hide();
             }
@@ -197,8 +209,8 @@ fn refresh_texts(app: &AppHandle) {
     let text = i18n::text(&state.prefs.lock().unwrap().language);
     let on = is_active(app);
     if let Some(items) = state.tray.lock().unwrap().as_ref() {
-        let _ = items.toggle.set_text(if on { text.turn_off } else { text.turn_on });
-        let _ = items.clear.set_text(text.clear);
+        let _ = items.toggle.set_text(i18n::item(if on { text.turn_off } else { text.turn_on }));
+        let _ = items.clear.set_text(i18n::item(text.clear));
         let _ = items.settings.set_text(text.settings);
         let _ = items.quit.set_text(text.quit);
     }
@@ -226,10 +238,13 @@ pub fn size_toolbar(app: &AppHandle) {
         prefs.pinned.len() + usize::from(!prefs.pinned.contains(&prefs.style))
     } as f64;
     // body 14px padding, bar 10/8px padding + 1px border, 40px buttons,
-    // 6px gaps, a 1px divider, then ink, sound and exit.
-    let items = n + 4.0;
-    let width = 28.0 + 22.0 + n * 40.0 + 1.0 + 3.0 * 40.0 + (items - 1.0) * 6.0;
-    let height = 28.0 + 18.0 + 40.0;
+    // 6px gaps. Pointer bar: the hands, a divider, sound and exit.
+    let hands = 22.0 + n * 40.0 + 1.0 + 2.0 * 40.0 + (n + 2.0) * 6.0;
+    // Tool bar: 2 buttons and a divider.
+    let tools = 22.0 + 2.0 * 40.0 + 1.0 + 2.0 * 6.0;
+    let width = 28.0 + f64::max(hands, tools);
+    // The two bars, plus the space kept for the tray and hints (.top in the page).
+    let height = 28.0 + 2.0 * 58.0 + 8.0 + 128.0 + 8.0;
     let _ = w.set_size(tauri::LogicalSize::new(width, height));
 }
 
@@ -276,6 +291,7 @@ pub fn configure_overlay(app: &AppHandle) {
                 shadow: prefs.show_shadow,
                 fade_seconds: prefs.fade_seconds,
                 ink: prefs.ink_rgb(),
+                pen_scale: tools::pen_scale(prefs.pen_size),
             },
             sound: prefs.sound_on().then(|| sounds::bytes(&prefs.tap_sound)),
             interact: prefs.interact_key,
@@ -323,7 +339,7 @@ pub fn ui_state(app: &AppHandle) -> UiState {
         launch_at_login: app.autolaunch().is_enabled().unwrap_or(false),
         version: app.package_info().version.to_string(),
         build: env!("TINYHAND_BUILD"),
-        platform_ready: cfg!(windows),
+        platform_ready: cfg!(any(windows, target_os = "macos")),
     }
 }
 
@@ -345,8 +361,10 @@ pub fn ensure_toolbar(app: &AppHandle) -> Option<WebviewWindow> {
         .shadow(false)
         .focused(false)
         .visible(false);
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     let builder = builder.transparent(true);
+    #[cfg(target_os = "macos")]
+    let builder = builder.accept_first_mouse(true);
     match builder.build() {
         Ok(w) => {
             crate::platform::prepare_toolbar(&w);

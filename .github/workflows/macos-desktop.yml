@@ -1,0 +1,33 @@
+name: macOS desktop
+
+# The Rust + Tauri build. The Swift app has its own workflows.
+on:
+  pull_request:
+    paths: ["desktop/**", "assets/**", ".github/workflows/macos-desktop.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop
+      - name: Test core
+        run: cargo test -p tinyhand-core
+      - name: Build the app
+        working-directory: desktop/app
+        run: npx --yes @tauri-apps/cli@2 build --target universal-apple-darwin --bundles dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TinyHand-macos
+          path: desktop/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error

@@ -168,6 +168,7 @@ struct Runner {
     last_maintain: Instant,
     last_raise: Instant,
     last_pt: POINT,
+    toolbar_pointer: Option<(f32, f32)>,
 }
 
 const IDLE: Duration = Duration::from_millis(50);
@@ -204,6 +205,7 @@ impl Runner {
             last_maintain: now,
             last_raise: now,
             last_pt: POINT::default(),
+            toolbar_pointer: None,
         }
     }
 
@@ -291,12 +293,12 @@ impl Runner {
         match e {
             HookEvent::Moved => self.last_move = Instant::now(),
             HookEvent::Down { left } => {
-                if let Some(wav) = self.sound {
-                    crate::audio::play(wav);
-                }
                 let pt = cursor_pos();
                 let at = ((pt.x - self.monitor.left) as f32, (pt.y - self.monitor.top) as f32);
                 self.engine.mouse_down(left, at);
+                if let Some(wav) = self.sound {
+                    crate::audio::play(wav);
+                }
                 self.set_revealed(false);
                 log::write(format!("press at {},{} left={left}", at.0 as i32, at.1 as i32));
             }
@@ -398,7 +400,7 @@ impl Runner {
         self.hook = None;
         crate::audio::hold(false);
         self.engine.mouse_up(Instant::now());
-        self.engine.clear_ink();
+        self.engine.end_session();
         self.surface = None;
         self.monitor = RECT::default();
         self.set_cursor_hidden(false);
@@ -455,6 +457,8 @@ impl Runner {
         self.set_cursor_hidden(!real_cursor);
         self.engine.set_visible(!real_cursor);
         self.update_reveal(pt, now);
+        self.publish_pass_rects();
+        self.update_toolbar_pointer(pt);
 
         let local = ((pt.x - self.monitor.left) as f32, (pt.y - self.monitor.top) as f32);
         if let Some(dirty) = self.engine.frame(now, dt, local) {
@@ -480,7 +484,7 @@ impl Runner {
             let (w, h) = (m.right - m.left, m.bottom - m.top);
             self.surface = None;
             self.surface = Surface::new(w, h);
-            self.engine.set_screen(w as u32, h as u32);
+            self.engine.set_monitor((m.left, m.top, w as u32, h as u32));
             self.frame_interval = refresh_interval(&info.szDevice);
             if let Some(hwnd) = self.hwnd {
                 let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), m.left, m.top, w, h, SWP_NOACTIVATE);
@@ -515,11 +519,10 @@ impl Runner {
     /// tick and tuck it back directly under the overlay when needed.
     fn keep_order(&self) {
         let (Some(overlay), Some(toolbar)) = (self.hwnd, self.toolbar) else { return };
-        if is_above(overlay, toolbar) {
-            return;
-        }
-        unsafe {
-            let _ = SetWindowPos(toolbar, Some(overlay), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        if !is_above(overlay, toolbar) {
+            unsafe {
+                let _ = SetWindowPos(toolbar, Some(overlay), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
         }
     }
 
@@ -543,10 +546,27 @@ impl Runner {
         }
     }
 
+    /// The part of the toolbar window that's showing something.
+    fn toolbar_solid(&self) -> Option<RECT> {
+        let r = self.toolbar_rect?;
+        let top = r.top + ((r.bottom - r.top) as f64 * crate::platform::toolbar_solid_top()) as i32;
+        Some(RECT { top, ..r })
+    }
+
+    fn update_toolbar_pointer(&mut self, pt: POINT) {
+        let at = self.toolbar_rect.filter(|r| self.revealed && contains(r, pt) && r.right > r.left && r.bottom > r.top).map(|r| {
+            ((pt.x - r.left) as f32 / (r.right - r.left) as f32, (pt.y - r.top) as f32 / (r.bottom - r.top) as f32)
+        });
+        if at != self.toolbar_pointer {
+            self.toolbar_pointer = at;
+            (self.on_event)(OverlayEvent::ToolbarPointer(at));
+        }
+    }
+
     fn publish_pass_rects(&self) {
         let mut rects = self.taskbars.clone();
         if self.revealed {
-            rects.extend(self.toolbar_rect);
+            rects.extend(self.toolbar_solid());
         }
         if let Ok(mut pass) = self.shared.pass.lock() {
             *pass = rects;
@@ -572,7 +592,7 @@ impl Runner {
     /// The toolbar fades out unless the cursor is near it (port of the
     /// macOS reveal zone: a bit wider than the bar and 90pt above it).
     fn update_reveal(&mut self, pt: POINT, now: Instant) {
-        let Some(r) = self.toolbar_rect else { return };
+        let Some(r) = self.toolbar_solid() else { return };
         let scale = self.toolbar.map(|t| unsafe { GetDpiForWindow(t) }).unwrap_or(96).max(96) as i32;
         let s = |v: i32| v * scale / 96;
         let zone = RECT { left: r.left - s(80), top: r.top - s(100), right: r.right + s(80), bottom: r.bottom + s(10) };

@@ -1,5 +1,6 @@
-//! Freehand drawing. Port of `Ink.swift`: smooth quadratic strokes with a soft
-//! shadow that fade out a few seconds after the button is released.
+//! Drawing on the screen. Started as a port of `Ink.swift`: smooth quadratic
+//! strokes with a soft shadow that fade out a few seconds after the button is
+//! released.
 
 use std::time::Instant;
 
@@ -11,10 +12,16 @@ const FADE_DURATION: f32 = 0.6;
 const MIN_STEP: f32 = 1.5;
 const SHADOW_OFFSET: (f32, f32) = (1.0, 1.5);
 
-pub struct Stroke {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Pen {
+    pub color: [u8; 3],
+    pub width: f32,
+    pub shadow: bool,
+}
+
+struct Stroke {
     pts: Vec<(f32, f32)>,
-    color: [u8; 3],
-    width: f32,
+    pen: Pen,
     ended: Option<Instant>,
     min: (f32, f32),
     max: (f32, f32),
@@ -22,7 +29,7 @@ pub struct Stroke {
 
 impl Stroke {
     fn pad(&self) -> f32 {
-        self.width / 2.0 + 4.0
+        self.pen.width / 2.0 + 4.0
     }
 
     fn bounds(&self) -> IRect {
@@ -60,6 +67,21 @@ impl Stroke {
         }
         pb.finish()
     }
+
+    fn draw(&self, pm: &mut Pixmap, offset: Transform, alpha: f32) {
+        let Some(path) = self.path() else { return };
+        let stroke = SkStroke { width: self.pen.width, line_cap: LineCap::Round, line_join: LineJoin::Round, ..Default::default() };
+        let mut paint = Paint { anti_alias: true, ..Default::default() };
+        if self.pen.shadow {
+            paint.set_color(Color::from_rgba(0.0, 0.0, 0.0, 0.18 * alpha).unwrap_or(Color::TRANSPARENT));
+            let shadow = offset.pre_translate(SHADOW_OFFSET.0, SHADOW_OFFSET.1);
+            pm.stroke_path(&path, &paint, &stroke, shadow, None);
+        }
+        let [r, g, b] = self.pen.color;
+        paint.set_color_rgba8(r, g, b, (alpha * 255.0).round() as u8);
+        pm.stroke_path(&path, &paint, &stroke, offset, None);
+    }
+
 }
 
 #[derive(Default)]
@@ -77,8 +99,8 @@ impl Ink {
         self.strokes.is_empty()
     }
 
-    pub fn begin(&mut self, p: (f32, f32), color: [u8; 3], width: f32) -> IRect {
-        let s = Stroke { pts: vec![p], color, width, ended: None, min: p, max: p };
+    pub fn begin(&mut self, p: (f32, f32), pen: Pen) -> IRect {
+        let s = Stroke { pts: vec![p], pen, ended: None, min: p, max: p };
         let b = s.bounds();
         self.strokes.push(s);
         self.drawing = true;
@@ -109,19 +131,24 @@ impl Ink {
     }
 
     pub fn end(&mut self, now: Instant) {
-        if self.drawing {
-            if let Some(s) = self.strokes.last_mut() {
-                s.ended = Some(now);
-            }
+        if !self.drawing {
+            return;
         }
         self.drawing = false;
+        let Some(s) = self.strokes.last_mut() else { return };
+        s.ended = Some(now);
     }
 
+    /// Wipe everything.
     pub fn clear(&mut self) -> Option<IRect> {
         let area = self.strokes.iter().map(Stroke::bounds).reduce(IRect::union);
         self.strokes.clear();
         self.drawing = false;
         area
+    }
+
+    pub fn area(&self) -> Option<IRect> {
+        self.strokes.iter().map(Stroke::bounds).reduce(IRect::union)
     }
 
     pub fn is_fading(&self, now: Instant, fade_seconds: f32) -> bool {
@@ -142,20 +169,47 @@ impl Ink {
         dirty
     }
 
+    /// Draw into `pm`, a fresh transparent pixmap covering `clip`.
     pub fn render(&self, pm: &mut Pixmap, offset: Transform, now: Instant, fade_seconds: f32, clip: IRect) {
         for s in &self.strokes {
-            if s.bounds().intersect(clip).is_none() {
-                continue;
+            if s.bounds().intersect(clip).is_some() {
+                s.draw(pm, offset, s.alpha(now, fade_seconds));
             }
-            let alpha = s.alpha(now, fade_seconds);
-            let Some(path) = s.path() else { continue };
-            let stroke = SkStroke { width: s.width, line_cap: LineCap::Round, line_join: LineJoin::Round, ..Default::default() };
-            let mut paint = Paint { anti_alias: true, ..Default::default() };
-            paint.set_color(Color::from_rgba(0.0, 0.0, 0.0, 0.18 * alpha).unwrap_or(Color::TRANSPARENT));
-            let shadow = offset.pre_translate(SHADOW_OFFSET.0, SHADOW_OFFSET.1);
-            pm.stroke_path(&path, &paint, &stroke, shadow, None);
-            paint.set_color_rgba8(s.color[0], s.color[1], s.color[2], (alpha * 255.0).round() as u8);
-            pm.stroke_path(&path, &paint, &stroke, offset, None);
         }
+    }
+
+    #[cfg(test)]
+    fn stroke_count(&self) -> usize {
+        self.strokes.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    const PEN: Pen = Pen { color: [255, 0, 0], width: 4.0, shadow: false };
+
+    fn line(ink: &mut Ink, from: (f32, f32), to: (f32, f32), now: Instant) {
+        ink.begin(from, PEN);
+        let steps = 20;
+        for i in 1..=steps {
+            let t = i as f32 / steps as f32;
+            ink.extend((from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t));
+        }
+        ink.end(now);
+    }
+
+    #[test]
+    fn strokes_fade_unless_kept() {
+        let mut ink = Ink::default();
+        let t = Instant::now();
+        line(&mut ink, (10.0, 10.0), (100.0, 10.0), t);
+        let later = t + Duration::from_secs(10);
+        ink.tick(later, 0.0);
+        assert_eq!(ink.stroke_count(), 1, "kept");
+        ink.tick(later, 3.0);
+        assert!(ink.is_empty(), "faded");
     }
 }

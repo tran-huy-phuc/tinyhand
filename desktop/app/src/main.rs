@@ -53,10 +53,12 @@ fn main() {
             commands::toggle_sound,
             commands::set_active,
             commands::clear_ink,
+            commands::set_pen_size,
             commands::open_settings,
             commands::preview_sound,
             commands::set_launch_at_login,
             commands::toolbar_resize,
+            commands::toolbar_solid_top,
         ])
         .setup(|app| {
             app::setup(app)?;

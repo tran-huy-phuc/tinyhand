@@ -63,12 +63,28 @@
       inBadge: '✓ In toolbar',
       removeShort: 'Remove',
       addShort: '+ Add to toolbar',
-      inkTitle: 'Ink colour',
-      soundOnTitle: 'Tap sound on — click to mute',
-      soundOffTitle: 'Tap sound off — click to unmute',
-      exitTitle: 'Exit  (Esc)',
+      inkTitle: 'Colour and thickness',
+      soundTitle: 'Tap sound',
+      exitTitle: 'Exit',
       pickTitle: 'Choose your language',
       pickHint: 'You can change this later in Settings.',
+      welcomeHtmlMac:
+        '<p><strong>Welcome!</strong> TinyHand lives in the menu bar.</p><ul>' +
+        '<li>Click its icon or press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>H</kbd> to turn the pointer on or off. The first time, macOS asks for Accessibility, which lets TinyHand turn your clicks into taps.</li>' +
+        '<li>Click to tap. Nothing underneath gets clicked. Hold and drag to draw.</li>' +
+        '<li>Hold <kbd>{key}</kbd> to click things for real. <kbd>Esc</kbd> turns the pointer off.</li></ul>',
+      keyToggleHtmlMac: '<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>H</kbd> or click the menu bar icon',
+      keyClearCombo: 'Ctrl+Alt+X',
+      keyExitCombo: 'Esc',
+      showHints: 'Explain toolbar buttons on hover',
+      hintsOff: "Don't show again",
+      hintsOffNote: 'You can turn this back on in Settings.',
+      clearTitle: 'Clear everything',
+      descInk: 'Choose the colour and thickness of your pen.',
+      descClear: 'Removes the whole drawing.',
+      descSound: 'Turns the tap sound on or off.',
+      descExit: 'Turns the pointer off and clears drawings on the screen.',
+      penSize: 'Thickness {n}',
     },
     vi: {
       tagline: 'Một bàn tay nhỏ trên que, chỉ vào mọi thứ trên màn hình của bạn.',
@@ -125,12 +141,26 @@
       inBadge: '✓ Đã thêm',
       removeShort: 'Bỏ',
       addShort: '+ Thêm vào thanh',
-      inkTitle: 'Màu mực',
-      soundOnTitle: 'Đang bật âm thanh chạm — bấm để tắt',
-      soundOffTitle: 'Đang tắt âm thanh chạm — bấm để bật',
-      exitTitle: 'Thoát  (Esc)',
+      inkTitle: 'Màu và độ dày',
+      soundTitle: 'Âm thanh chạm',
+      exitTitle: 'Thoát',
       pickTitle: 'Chọn ngôn ngữ',
       pickHint: 'Bạn có thể đổi lại trong phần Cài đặt.',
+      welcomeHtmlMac:
+        '<p><strong>Chào mừng bạn!</strong> TinyHand nằm trên thanh menu.</p><ul>' +
+        '<li>Bấm biểu tượng hoặc nhấn <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>H</kbd> để bật hoặc tắt con trỏ. Lần đầu, macOS sẽ hỏi quyền Trợ năng để TinyHand biến cú bấm thành cú chạm.</li>' +
+        '<li>Bấm để chạm: những gì bên dưới sẽ không bị bấm. Giữ và kéo để vẽ.</li>' +
+        '<li>Giữ <kbd>{key}</kbd> để bấm thật. Nhấn <kbd>Esc</kbd> để tắt con trỏ.</li></ul>',
+      keyToggleHtmlMac: '<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>H</kbd> hoặc bấm biểu tượng trên thanh menu',
+      showHints: 'Giải thích các nút khi rê chuột',
+      hintsOff: 'Không hiện lại',
+      hintsOffNote: 'Bạn có thể bật lại trong Cài đặt.',
+      clearTitle: 'Xóa hết',
+      descInk: 'Chọn màu và độ dày của bút.',
+      descClear: 'Xóa toàn bộ nét vẽ.',
+      descSound: 'Bật hoặc tắt âm thanh khi chạm.',
+      descExit: 'Tắt con trỏ và xóa nét trên màn hình.',
+      penSize: 'Độ dày {n}',
     },
   };
 
@@ -173,10 +203,18 @@
     return l && STRINGS[l] ? l : guess();
   }
 
+  const IS_MAC = /Mac/.test(navigator.platform || '');
+
   function t(l, key, vars) {
-    let s = (STRINGS[l] && STRINGS[l][key]) ?? STRINGS.en[key] ?? key;
+    const macKey = IS_MAC ? key + 'Mac' : key;
+    let s = (STRINGS[l] && (STRINGS[l][macKey] ?? STRINGS[l][key])) ?? STRINGS.en[macKey] ?? STRINGS.en[key] ?? key;
     for (const [k, v] of Object.entries(vars || {})) s = s.split('{' + k + '}').join(v);
-    return s;
+    return IS_MAC ? macNames(s) : s;
+  }
+
+  /** The same physical keys, as a Mac keyboard names them. */
+  function macNames(s) {
+    return s.replace(/Ctrl\+Alt\+/g, '⌃⌥').replace(/\bAlt\b/g, 'Option');
   }
 
   /** Fill [data-i18n] (text), [data-i18n-html] (markup), [data-i18n-title] and [data-i18n-aria]. */
@@ -187,6 +225,11 @@
     root.querySelectorAll('[data-i18n-html]').forEach(el => { el.innerHTML = t(l, el.dataset.i18nHtml, vars); });
     root.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(l, el.dataset.i18nTitle, vars); });
     root.querySelectorAll('[data-i18n-aria]').forEach(el => { el.setAttribute('aria-label', t(l, el.dataset.i18nAria, vars)); });
+    if (IS_MAC) {
+      root.querySelectorAll('kbd, option').forEach(el => {
+        el.textContent = macNames(el.textContent).replace(/^Ctrl$/, '⌃ Control').replace(/^Option$/, el.tagName === 'KBD' ? '⌥' : 'Option');
+      });
+    }
   }
 
   const pick = (table, l, id, fallback) => (table[l] && table[l][id]) || fallback;

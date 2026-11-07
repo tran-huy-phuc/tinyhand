@@ -208,6 +208,10 @@
       <select id="language"></select>
     </div>
     <div class="row">
+      <label class="name" for="hints" data-i18n="showHints"></label>
+      <input type="checkbox" id="hints">
+    </div>
+    <div class="row">
       <label class="name" for="login" data-i18n="login"></label>
       <input type="checkbox" id="login">
     </div>
@@ -411,6 +415,7 @@
     $('tap-sound').value = p.tapSound;
     $('interact').value = p.interactKey;
     $('fade').value = String(p.fadeSeconds);
+    $('hints').checked = p.showHints;
     $('inks').replaceChildren(...state.inks.map(([id, title, color]) => {
       const b = document.createElement('button');
       b.className = 'swatch' + (id === 'match' ? ' match' : '') + (id === p.ink ? ' on' : '');
@@ -435,6 +440,7 @@
   $('preview').onclick = () => invoke('preview_sound', { id: $('tap-sound').value });
   $('interact').onchange = e => save(q => { q.interactKey = e.target.value; });
   $('fade').onchange = e => save(q => { q.fadeSeconds = parseFloat(e.target.value); });
+  $('hints').onchange = e => save(q => { q.showHints = e.target.checked; });
   $('login').onchange = e => invoke('set_launch_at_login', { on: e.target.checked }).catch(err => {
     console.error(err);
     invoke('get_state').then(s => { state = s; render(); });

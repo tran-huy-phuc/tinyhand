@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::catalog;
+use crate::tools;
 
 pub const POINTER_SIZE_MIN: f32 = 0.08;
 pub const POINTER_SIZE_MAX: f32 = 0.20;
@@ -37,6 +38,10 @@ pub struct Prefs {
     pub welcomed: bool,
     /// UI language code ("en", "vi"); empty until the user picks one.
     pub language: String,
+    /// Index into [`tools::PEN_SIZES`].
+    pub pen_size: u8,
+    /// Explain toolbar buttons when the pointer rests on them.
+    pub show_hints: bool,
 }
 
 impl Default for Prefs {
@@ -54,6 +59,8 @@ impl Default for Prefs {
             ink: "match".into(),
             welcomed: false,
             language: String::new(),
+            pen_size: tools::DEFAULT_PEN_SIZE,
+            show_hints: true,
         }
     }
 }
@@ -90,6 +97,7 @@ impl Prefs {
         if !catalog::INKS.iter().any(|(id, _, _)| *id == self.ink) {
             self.ink = d.ink;
         }
+        self.pen_size = self.pen_size.min(tools::PEN_SIZES.len() as u8 - 1);
         self
     }
 
@@ -127,6 +135,19 @@ mod tests {
         let p: Prefs = serde_json::from_str(r#"{"style":"robot"}"#).unwrap_or_default();
         assert_eq!(p.style, "robot");
         assert_eq!(p.pointer_size, 0.13);
+    }
+
+    #[test]
+    fn old_prefs_files_get_defaults() {
+        let p: Prefs = serde_json::from_str(r#"{"style":"robot","fadeSeconds":5.0}"#).unwrap();
+        assert_eq!(p.pen_size, tools::DEFAULT_PEN_SIZE);
+        assert!(p.show_hints);
+    }
+
+    #[test]
+    fn sanitize_limits_the_pen_size() {
+        let q = Prefs { pen_size: 99, ..Prefs::default() }.sanitized();
+        assert_eq!(q.pen_size, 3);
     }
 
     #[test]

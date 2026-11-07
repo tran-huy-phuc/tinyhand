@@ -1,8 +1,8 @@
-# TinyHand for Windows (Rust + Tauri)
+# TinyHand for Windows and macOS (Rust + Tauri)
 
-Cross-platform TinyHand, starting with Windows. The macOS app in `../Sources`
-stays the shipping Mac build for now. This workspace is meant to take it over
-once its overlay is ported (see "Porting to macOS" below).
+Cross-platform TinyHand. The Swift app in `../Sources` is the original Mac
+build and stays until this one has been proven on real Macs and has what it
+still lacks (see "Known gaps").
 
 ```
 desktop/
@@ -13,19 +13,30 @@ desktop/
   ui/     toolbar.html and settings.html (plain HTML/JS, no bundler).
 ```
 
-## How it works on Windows
+## Drawing tools
 
-| macOS (Swift) | Windows (`app/src/platform/windows`) |
+All in `core`, so both platforms behave the same:
+
+| Tool | Where | Notes |
+|---|---|---|
+| Pen, thickness | `engine.rs`, `ink.rs` | Strokes fade after a few seconds, or stay until cleared |
+
+Drawings are kept per monitor, so moving the cursor to another screen no longer
+wipes them. They only show on the monitor the cursor is on, though.
+
+## How it works on each OS
+
+| macOS (`app/src/platform/macos`, after `../Sources`) | Windows (`app/src/platform/windows`) |
 |---|---|
 | `CGEventTap` + Accessibility permission | `WH_MOUSE_LL` low-level hook (`hook.rs`). No permission needed |
-| `NSWindow` at screenSaver level + Core Animation | Layered `WS_EX_TRANSPARENT \| TOPMOST` window, painted by `tinyhand_core::Engine` via `UpdateLayeredWindowIndirect` with a dirty rect (`overlay.rs`) |
+| `NSWindow` at screenSaver level showing two IOSurfaces in turn, painted by the same engine off the main thread | Layered `WS_EX_TRANSPARENT \| TOPMOST` window, painted by `tinyhand_core::Engine` via `UpdateLayeredWindowIndirect` with a dirty rect (`overlay.rs`) |
 | `CGDisplayHideCursor` + private CGS calls | Every system cursor swapped for a blank one, restored with `SPI_SETCURSORS` on exit, on panic and on next launch (`cursor.rs`) |
 | Carbon hotkeys | `tauri-plugin-global-shortcut` (Ctrl+Alt+H, Ctrl+Alt+X, Esc while on) |
 | Menu bar item | Tray icon (left click toggles, right click menu) |
 | Dock / menu bar pass-through | Taskbar strips, the toolbar and the Settings window pass clicks through |
 | Hold ⌥ to click for real | Hold Alt (or Ctrl/Shift). Alt-clicks are followed by a dummy key so Alt doesn't open app menus |
-| AVAudioEngine | `PlaySound` from memory (`sound.rs`) |
-| `SMAppService` | `tauri-plugin-autostart` (HKCU Run key) |
+| cpal (`audio.rs`) | cpal (`audio.rs`) |
+| `tauri-plugin-autostart` (LaunchAgent) | `tauri-plugin-autostart` (HKCU Run key) |
 
 The overlay thread sleeps on a channel: a click wakes it at once. While the
 mouse moves or something animates, it ticks at the monitor's refresh rate,
@@ -37,6 +48,18 @@ Rendering cost per moving frame (Apple M-series, `cargo run -p tinyhand-core --r
 about 1.6 ms at 1920×1080 and 6.4 ms at 3840×2160, with shadow.
 
 ## Build
+
+macOS (native; `--bundles dmg` also works, and needs a logged-in session):
+
+```sh
+cd desktop/app
+npx @tauri-apps/cli@2 dev                 # run
+npx @tauri-apps/cli@2 build --bundles app # desktop/target/release/bundle/macos/TinyHand.app
+```
+
+Builds are ad-hoc signed by default. Set `APPLE_SIGNING_IDENTITY` to a
+Developer ID Application certificate to distribute one. A dev build also reads
+`TINYHAND_POINTER_ON`, to start with the pointer on.
 
 Windows (native):
 
@@ -70,10 +93,6 @@ stub overlay, which is handy for UI work.
 
 ## Known gaps / next steps
 
-- **Not yet run on real Windows hardware.** It compiles and links for
-  x86_64-pc-windows-msvc, and the core is tested. First thing to check on a
-  Windows machine: cursor hiding, hook behaviour, toolbar clicks not stealing
-  focus.
 - Over windows running as admin (Task Manager, elevated terminals), Windows
   doesn't let a normal app's hook see the clicks, so they go through. Staying
   above the Start menu also needs `uiAccess="true"`, which needs a signed
@@ -82,15 +101,10 @@ stub overlay, which is handy for UI work.
   show it. A fallback is the Magnification API's `MagShowSystemCursor`.
 - Sign the installer (e.g. Azure Trusted Signing). An unsigned app that hooks
   the mouse and hides the cursor will get SmartScreen and antivirus warnings.
-- Still missing compared to the Mac app: custom hands (HandMaker), the
-  first-run hint bubble, an ink colour button in the toolbar, editable
-  shortcuts, and auto-update (`tauri-plugin-updater`).
+- Still missing compared to the Swift app, on both OSes: custom hands
+  (HandMaker), the first-run hint bubble, editable shortcuts, and auto-update
+  (`tauri-plugin-updater`).
+- macOS: not code-signed with a Developer ID or notarized. Esc stays taken
+  while a menu is open, where the Swift app gives it back.
 - Performance headroom: on 4K screens a DirectComposition backend (GPU
   transforms, like Core Animation on the Mac) would make frames nearly free.
-
-## Porting to macOS
-
-`tinyhand-core` already has everything except the OS layer. A
-`platform/macos.rs` would provide the same `Overlay` API using a CGEventTap,
-an `NSWindow` (via `objc2`) fed by `Engine::render`, and the existing
-cursor-hiding approach from `CursorHider.swift`.
